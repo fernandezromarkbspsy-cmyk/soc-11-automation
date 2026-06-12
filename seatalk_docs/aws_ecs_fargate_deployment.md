@@ -1,6 +1,7 @@
 # AWS ECS Fargate UI Deployment Guide
 
 This guide deploys the SeaTalk callback server to AWS using the AWS Console as much as possible.
+Docker builds and image pushes are handled by GitHub Actions, so Docker Desktop is not required locally.
 
 Target callback URL:
 
@@ -35,8 +36,7 @@ ap-southeast-1
 Have these ready:
 
 - AWS account access for ECR, ECS, EC2 load balancing, ACM, IAM, CloudWatch Logs, and Secrets Manager
-- Docker Desktop installed locally
-- AWS CLI configured locally, only for pushing the Docker image to ECR
+- GitHub repository access with permission to add repository Actions secrets
 - Cloudflare DNS access for `soc5outboundops.app`
 - Google service account JSON from `credentials/google-service-account.json`
 - SeaTalk bot credentials from `credentials/bot_credentials`
@@ -65,18 +65,106 @@ soc11-seatalk-callback
 5. Leave the remaining defaults.
 6. Click **Create repository**.
 
-Open the repository and click **View push commands**. Keep that modal open or copy the commands.
+Copy the repository URI. It should look like:
 
-Build and push from this repo root using the commands AWS shows. The commands will look like this:
-
-```powershell
-aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-southeast-1.amazonaws.com
-docker build -t soc11-seatalk-callback .
-docker tag soc11-seatalk-callback:latest <account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/soc11-seatalk-callback:latest
-docker push <account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/soc11-seatalk-callback:latest
+```text
+<account-id>.dkr.ecr.ap-southeast-1.amazonaws.com/soc11-seatalk-callback
 ```
 
-After the push finishes, refresh the ECR repository and confirm the `latest` image exists.
+The repo includes this GitHub Actions workflow:
+
+```text
+.github/workflows/deploy-ecs.yml
+```
+
+That workflow builds the Docker image on GitHub-hosted runners and pushes both `latest` and the commit SHA tag to ECR. After the ECS service exists, the same workflow also forces the service to redeploy.
+
+### Create GitHub Actions AWS Credentials
+
+Create an IAM user for GitHub Actions.
+
+1. Open **IAM** > **Users**.
+2. Click **Create user**.
+3. User name:
+
+```text
+soc11-seatalk-github-actions
+```
+
+4. Create the user without console access.
+5. Open the user and create an access key for **Application running outside AWS**.
+6. Save the access key ID and secret access key.
+
+Attach this inline policy to the IAM user, replacing `<account-id>`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:CompleteLayerUpload",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart"
+      ],
+      "Resource": "arn:aws:ecr:ap-southeast-1:<account-id>:repository/soc11-seatalk-callback"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeServices",
+        "ecs:UpdateService"
+      ],
+      "Resource": "arn:aws:ecs:ap-southeast-1:<account-id>:service/soc11-seatalk/soc11-seatalk-callback-service"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeClusters"
+      ],
+      "Resource": "arn:aws:ecs:ap-southeast-1:<account-id>:cluster/soc11-seatalk"
+    }
+  ]
+}
+```
+
+In GitHub:
+
+1. Open the repository.
+2. Go to **Settings** > **Secrets and variables** > **Actions**.
+3. Add repository secret:
+
+```text
+AWS_ACCESS_KEY_ID=<iam-user-access-key-id>
+```
+
+4. Add repository secret:
+
+```text
+AWS_SECRET_ACCESS_KEY=<iam-user-secret-access-key>
+```
+
+### Push the First Image from GitHub Actions
+
+Commit and push this repo to the `main` branch. GitHub Actions will run automatically.
+
+You can also run it manually:
+
+1. Open GitHub **Actions**.
+2. Select **Deploy ECS Fargate**.
+3. Click **Run workflow**.
+
+For the first run, the workflow can finish before the ECS service exists. That is fine. Refresh the ECR repository and confirm the `latest` image exists.
 
 ## Step 2: Create Secrets
 
@@ -509,22 +597,13 @@ Columns: bot_name, app_id, app_secret, signing_secret, group_id, group_name, is_
 
 ## Updating the App Later
 
-Use the ECR repository page:
+Use GitHub Actions:
 
-1. Open **Amazon ECR**.
-2. Open `soc11-seatalk-callback`.
-3. Click **View push commands**.
-4. Run the generated build, tag, and push commands from the repo root.
+1. Push changes to the `main` branch, or open GitHub **Actions**.
+2. Select **Deploy ECS Fargate**.
+3. Click **Run workflow**.
 
-Then redeploy in ECS:
-
-1. Open **Amazon ECS** > **Clusters** > `soc11-seatalk`.
-2. Open `soc11-seatalk-callback-service`.
-3. Click **Update service**.
-4. Enable **Force new deployment**.
-5. Save.
-
-ECS will pull the new `latest` image and replace the running task.
+The workflow builds the image, pushes it to ECR, runs `aws ecs update-service --force-new-deployment`, and waits for the ECS service to become stable. If the ECS service does not exist yet, it only pushes the image.
 
 ## Troubleshooting
 
@@ -564,6 +643,17 @@ Common causes:
 - invalid JSON in Secrets Manager
 - task execution role cannot read Secrets Manager
 - task execution role cannot pull from ECR
+
+### GitHub Actions Deploy Fails
+
+Check:
+
+- repository secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` exist
+- IAM policy uses the correct AWS account ID
+- ECR repository is named `soc11-seatalk-callback`
+- ECS cluster is named `soc11-seatalk`
+- ECS service is named `soc11-seatalk-callback-service`
+- ECS task definition image URI ends with `soc11-seatalk-callback:latest`
 
 ### `/healthz` Shows `configured_bots: 0`
 
@@ -609,4 +699,5 @@ Check:
 - ECS secrets injection: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html
 - ECS service load balancing: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-load-balancing.html
 - ECR Docker push flow: https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html
+- GitHub Actions secrets: https://docs.github.com/actions/security-guides/using-secrets-in-github-actions
 - ACM DNS validation: https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
