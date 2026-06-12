@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: seatalk-bot
+    runtime: docker
+    region: oregon
+    plan: free
+    
+    # Build from Dockerfile
+    dockerfile: ./Dockerfile
+    dockerContext: ./
+    
+    # Port
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: SEATALK_REQUIRE_SIGNATURE
+        value: "true"
+      - key: SHEET_ID
+        value: 1BgorYmizHGxOzzauLxSL_uu8WSybQYjvtSnbCeZjLf8
+      - key: SHEET_TAB_NAME
+        value: bot_groupid
+    
+    # Secrets (add manually in Render dashboard):
+    # - BOT_CREDENTIALS_JSON
+    # - GOOGLE_SERVICE_ACCOUNT_JSON
