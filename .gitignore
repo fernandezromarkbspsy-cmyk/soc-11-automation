@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.gocache/
 .runtime/
 credentials/google-service-account.json
 credentials/bot_credentials/*.txt

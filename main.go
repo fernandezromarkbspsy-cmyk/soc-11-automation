@@ -340,6 +340,9 @@ func loadBotCredentialsFromEnv() (map[string]BotCredential, error) {
 	if rawCredentials == "" {
 		return map[string]BotCredential{}, nil
 	}
+	if !strings.HasPrefix(rawCredentials, "{") && !strings.HasPrefix(rawCredentials, "[") {
+		return nil, fmt.Errorf("BOT_CREDENTIALS_JSON must contain the credential JSON payload, not a secret name or plain text value; got value beginning with %q", firstRune(rawCredentials))
+	}
 
 	var credentials []BotCredential
 	if err := json.Unmarshal([]byte(rawCredentials), &credentials); err != nil {
@@ -364,6 +367,13 @@ func loadBotCredentialsFromEnv() (map[string]BotCredential, error) {
 		byAppID[credential.AppID] = credential
 	}
 	return byAppID, nil
+}
+
+func firstRune(value string) string {
+	for _, char := range value {
+		return string(char)
+	}
+	return ""
 }
 
 func loadBotCredentialsFromDir(credentialsDir string) map[string]BotCredential {
