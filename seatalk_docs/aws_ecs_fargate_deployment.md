@@ -655,6 +655,23 @@ Check:
 - ECS service is named `soc11-seatalk-callback-service`
 - ECS task definition image URI ends with `soc11-seatalk-callback:latest`
 
+### ECS Service Stuck in `UPDATE_IN_PROGRESS`
+
+Open **Amazon ECS** > **Clusters** > `soc11-seatalk` > `soc11-seatalk-callback-service`.
+
+Check **Events** first. The event message usually points to the exact issue.
+
+Common fixes:
+
+- If tasks are starting and stopping, open the stopped task and check **Stopped reason**.
+- If health checks fail, confirm the target group health check path is `/healthz` and port is `8000`.
+- If no target becomes healthy, confirm `soc11-seatalk-task-sg` allows inbound TCP `8000` from `soc11-seatalk-alb-sg`.
+- If the task cannot pull the image, confirm the task definition image URI uses the ECR `latest` image and the task execution role has ECR permissions.
+- If the task exits quickly, open CloudWatch Logs group `/ecs/soc11-seatalk-callback`.
+- If Secrets Manager access fails, confirm `ecsTaskExecutionRole` can read both `soc11/google-service-account-json` and `soc11/bot-credentials-json`.
+
+After fixing the cause, click **Update service**, enable **Force new deployment**, and save.
+
 ### `/healthz` Shows `configured_bots: 0`
 
 Check ECS task definition **Secrets**:

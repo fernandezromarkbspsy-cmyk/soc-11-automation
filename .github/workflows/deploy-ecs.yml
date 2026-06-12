@@ -16,6 +16,7 @@ jobs:
   deploy:
     name: Build, push, and redeploy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -57,9 +58,17 @@ jobs:
               --cluster "$ECS_CLUSTER" \
               --service "$ECS_SERVICE" \
               --force-new-deployment
-            aws ecs wait services-stable \
+            if ! aws ecs wait services-stable \
               --cluster "$ECS_CLUSTER" \
-              --services "$ECS_SERVICE"
+              --services "$ECS_SERVICE"; then
+              echo "ECS service did not become stable. Recent service events:"
+              aws ecs describe-services \
+                --cluster "$ECS_CLUSTER" \
+                --services "$ECS_SERVICE" \
+                --query 'services[0].events[0:10].[createdAt,message]' \
+                --output table
+              exit 1
+            fi
           else
             echo "ECS service $ECS_SERVICE is not active yet. Image push complete; create the service before expecting redeploys."
           fi
