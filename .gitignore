@@ -10,3 +10,4 @@ credentials/bot_credentials/*.txt
 credentials/aws-bot-credentials.json
 seatalk-callback
 soc11_automation.exe
+scripts/export-bot-credentials-json.ps1
