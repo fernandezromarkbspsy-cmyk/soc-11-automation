@@ -1,0 +1,12 @@
+.env
+.env.*
+.git
+.runtime
+__pycache__
+*.pyc
+.pytest_cache
+credentials/google-service-account.json
+credentials/bot_credentials/*.txt
+credentials/aws-bot-credentials.json
+seatalk-callback
+soc11_automation.exe
