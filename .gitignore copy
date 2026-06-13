@@ -1,0 +1,45 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.crt
+*.p12
+*.json
+!package*.json
+!tsconfig*.json
+!bots/**/apps-script/appsscript.json
+
+# Go build/test outputs
+/seatalk-bot
+*.exe
+*.test
+*.out
+coverage.*
+
+# Generated report artifacts
+tmp/
+reports/
+work/
+*.pdf
+*.png
+
+# Docker and deploy local state
+.docker/
+.render/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+./google-service-account.json

@@ -8,6 +8,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/pdf-to-
 
 FROM debian:bookworm-slim
 
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates poppler-utils imagemagick \
     && rm -rf /var/lib/apt/lists/*
@@ -16,7 +18,8 @@ WORKDIR /app
 COPY --from=build /out/pdf-to-png-converter /app/pdf-to-png-converter
 
 ENV PORT=8080 \
-    WORK_DIR=/tmp/pdf-to-png-converter
+    WORK_DIR=/tmp/pdf-to-png-converter \
+    AWS_LWA_READINESS_CHECK_PATH=/healthz
 
 EXPOSE 8080
 ENTRYPOINT ["/app/pdf-to-png-converter"]

@@ -3,6 +3,57 @@
 This Go service receives SeaTalk event callbacks and stores `bot_added_to_group_chat`
 events in Google Sheets.
 
+## Render Event Callback Deployment
+
+This service is deployed on Render for SeaTalk event callbacks.
+
+Render callback URL:
+
+```text
+https://seatalk-bot.onrender.com/seatalk/callback
+```
+
+If you configure the custom Cloudflare domain, use:
+
+```text
+https://seatalk.soc5outboundops.app/seatalk/callback
+```
+
+The repository includes `render.yaml`, so deploy from Render by creating a Web Service or Blueprint from the GitHub repo. Render will build and run the Go callback server and provide HTTPS automatically.
+
+Required Render environment variables:
+
+```text
+PORT=8000
+SEATALK_REQUIRE_SIGNATURE=true
+SHEET_ID=1BgorYmizHGxOzzauLxSL_uu8WSybQYjvtSnbCeZjLf8
+SHEET_TAB_NAME=bot_groupid
+GOOGLE_SERVICE_ACCOUNT_JSON=<full google-service-account.json content>
+BOT_CREDENTIALS_JSON=<bot credentials JSON array>
+```
+
+Generate `BOT_CREDENTIALS_JSON` from local bot credential files with:
+
+```powershell
+.\scripts\export-bot-credentials-json.ps1
+```
+
+Then paste the generated JSON value into Render as a secret environment variable. It must start with `[` or `{`; do not set it to a filename or secret name.
+
+Health check:
+
+```text
+https://seatalk-bot.onrender.com/healthz
+```
+
+Expected response includes `status: "ok"`, `configured_bots` greater than `0`, and `google_service_account_configured: true`.
+
+Full Render guide:
+
+```text
+RENDER_DEPLOYMENT.md
+```
+
 ## Callback URL
 
 Use this callback path in SeaTalk Open Platform:
@@ -24,19 +75,24 @@ https://<your-domain>/seatalk/callback
 Cloudflare DNS must point that hostname to a running public copy of this Go service.
 DNS by itself does not host the app.
 
-Use one of these setups:
+For the current Render deployment, point Cloudflare to Render:
 
 ```text
-SeaTalk -> Cloudflare DNS -> Render/Fly/VPS running this Go service
+SeaTalk -> Cloudflare DNS -> Render running this Go service
+```
+
+Other supported setups:
+
+```text
 SeaTalk -> Cloudflare DNS -> Cloudflare Tunnel -> this server on localhost:8000
 ```
 
-For a normal hosted service, create a DNS record like:
+For Render custom domain hosting, create a DNS record like:
 
 ```text
 Type: CNAME
 Name: seatalk
-Target: <your-host-provider-domain>
+Target: seatalk-bot.onrender.com
 Proxy status: Proxied
 SSL/TLS mode: Full
 ```
@@ -57,7 +113,7 @@ Then use the tunnel hostname as the SeaTalk callback URL with `/seatalk/callback
 
 ## AWS Deployment
 
-For AWS hosting with your Name.com domain `soc5outboundops.app`, use:
+AWS ECS Fargate is still documented, but Render is the current simpler callback deployment. For AWS hosting with your Name.com domain `soc5outboundops.app`, use:
 
 ```text
 https://seatalk.soc5outboundops.app/seatalk/callback
