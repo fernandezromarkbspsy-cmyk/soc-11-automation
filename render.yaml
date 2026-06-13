@@ -5,8 +5,8 @@ services:
     region: oregon
     plan: free
     
-    # Build from Dockerfile
-    dockerfile: ./Dockerfile
+    # Build the SeaTalk callback server. The default Dockerfile is for the PDF converter.
+    dockerfile: ./Dockerfile.callback
     dockerContext: ./
     
     # Port
