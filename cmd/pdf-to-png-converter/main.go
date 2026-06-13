@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"soc11-automation/internal/converter"
+	"soc11_automation/internal/converter"
 )
 
 type config struct {
