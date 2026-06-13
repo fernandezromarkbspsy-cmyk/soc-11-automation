@@ -28,11 +28,11 @@ jobs:
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build image
-        run: docker build -t "$ACR_LOGIN_SERVER/soc5-pdf-to-png:latest" .
+        run: docker build -t "$ACR_LOGIN_SERVER/soc11-pdf-to-png:latest" .
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
       - name: Push image
-        run: docker push "$ACR_LOGIN_SERVER/soc5-pdf-to-png:latest"
+        run: docker push "$ACR_LOGIN_SERVER/soc11-pdf-to-png:latest"
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}

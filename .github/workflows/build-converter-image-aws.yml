@@ -14,7 +14,7 @@ on:
       - .github/workflows/build-converter-image-aws.yml
 
 env:
-  ECR_REPOSITORY: soc5-pdf-to-png
+  ECR_REPOSITORY: soc11-pdf-to-png
 
 jobs:
   build:
