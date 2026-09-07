@@ -65,7 +65,7 @@ func main() {
 }
 
 func loadConfig() config {
-	callbackPath := getEnv("SEATALK_CALLBACK_PATH", "/bot-callback")
+	callbackPath := getEnv("SEATALK_CALLBACK_PATH", "/seatalk/callback")
 	if !strings.HasPrefix(callbackPath, "/") {
 		callbackPath = "/" + callbackPath
 	}
