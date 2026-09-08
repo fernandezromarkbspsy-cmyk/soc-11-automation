@@ -218,7 +218,7 @@ func handleCanvaOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pendingAuth, ok := getAndDeleteCanvaAuth(state)
+	_, ok := getAndDeleteCanvaAuth(state)
 	if !ok {
 		http.Error(w, "invalid or expired OAuth state", http.StatusBadRequest)
 		return
