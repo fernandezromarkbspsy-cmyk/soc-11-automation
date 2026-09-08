@@ -260,11 +260,11 @@ func handleCanvaOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"message": "Canva authorization and token exchange succeeded.",
 		"token": map[string]any{
-			"token_type":   tokenResponse.TokenType,
-			"expires_in":   tokenResponse.ExpiresIn,
-			"scope":        tokenResponse.Scope,
-			"has_access":   tokenResponse.AccessToken != "",
-			"has_refresh":  tokenResponse.RefreshToken != "",
+		    "access_token":  tokenResponse.AccessToken,
+		    "refresh_token": tokenResponse.RefreshToken,
+		    "token_type":    tokenResponse.TokenType,
+		    "expires_in":    tokenResponse.ExpiresIn,
+		    "scope":         tokenResponse.Scope,
 		},
 	})
 }
