@@ -36,8 +36,12 @@ func main() {
 	cfg := loadConfig()
 
 	mux := http.NewServeMux()
+	
 	mux.HandleFunc("GET /healthz", health)
-	mux.HandleFunc("GET "+cfg.CallbackPath, canvaOAuthCallback)
+	
+	mux.HandleFunc("GET /canva/authorize", canvaAuthorize)
+	
+	mux.HandleFunc("GET "+cfg.CallbackPath, handleCanvaOAuthCallback)
 	mux.HandleFunc("POST "+cfg.CallbackPath, callback(cfg))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -83,22 +87,6 @@ func loadConfig() config {
 func health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
-}
-
-func canvaOAuthCallback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
-	if code == "" {
-		http.Error(w, "missing Canva authorization code", http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message": "Canva authorization succeeded. Copy the code and state, then exchange the code once.",
-		"code":    code,
-		"state":   state,
-	})
 }
 
 func callback(cfg config) http.HandlerFunc {
