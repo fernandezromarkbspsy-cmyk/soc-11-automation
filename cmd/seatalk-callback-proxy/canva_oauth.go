@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 
 const (
 	canvaAuthorizeURL = "https://www.canva.com/api/oauth/authorize"
+	canvaTokenURL     = "https://api.canva.com/rest/v1/oauth/token"
 
 	pkceStateLifetime = 10 * time.Minute
 )
@@ -33,66 +35,58 @@ var canvaAuthStore = struct {
 	values: make(map[string]pendingCanvaAuth),
 }
 
-// generateCodeVerifier creates a cryptographically random PKCE verifier.
-//
-// Canva requires the verifier to be between 43 and 128 characters.
-// 96 random bytes encoded with Base64URL produces a valid verifier.
+// ------------------------------------------------------------
+// PKCE
+// ------------------------------------------------------------
+
 func generateCodeVerifier() (string, error) {
+	// 96 random bytes produces a high-entropy URL-safe verifier.
 	b := make([]byte, 96)
 
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate code verifier: %w", err)
+		return "", err
 	}
 
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// generateCodeChallenge creates the S256 PKCE challenge:
-//
-// BASE64URL(SHA256(code_verifier))
 func generateCodeChallenge(codeVerifier string) string {
-	hash := sha256.Sum256([]byte(codeVerifier))
-
-	return base64.RawURLEncoding.EncodeToString(hash[:])
+	sum := sha256.Sum256([]byte(codeVerifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// generateOAuthState creates a separate random state value.
-//
-// IMPORTANT:
-// State must NOT contain the code_verifier.
 func generateOAuthState() (string, error) {
 	b := make([]byte, 32)
 
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate oauth state: %w", err)
+		return "", err
 	}
 
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// canvaAuthorize starts the Canva OAuth authorization flow.
-func canvaAuthorize(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// ------------------------------------------------------------
+// GET /canva/authorize
+// ------------------------------------------------------------
 
+func canvaAuthorize(w http.ResponseWriter, r *http.Request) {
 	clientID := strings.TrimSpace(os.Getenv("CANVA_CLIENT_ID"))
+
 	if clientID == "" {
 		http.Error(w, "CANVA_CLIENT_ID is not configured", http.StatusInternalServerError)
 		return
 	}
 
 	redirectURI := strings.TrimSpace(os.Getenv("CANVA_REDIRECT_URI"))
+
 	if redirectURI == "" {
 		redirectURI = "https://soc-11-automation.onrender.com/seatalk/callback"
 	}
 
-	scope := strings.TrimSpace(os.Getenv("CANVA_SCOPES"))
-	if scope == "" {
-		// Replace this with the scopes you actually enabled
-		// in the Canva Developer Portal.
-		scope = "asset:read"
+	scopes := strings.TrimSpace(os.Getenv("CANVA_SCOPES"))
+
+	if scopes == "" {
+		scopes = "asset:read"
 	}
 
 	codeVerifier, err := generateCodeVerifier()
@@ -109,13 +103,7 @@ func canvaAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store the verifier on the server.
-	//
-	// The verifier is deliberately NOT placed in:
-	// - the URL
-	// - state
-	// - the browser
-	// - the response
+	// Store the verifier server-side.
 	canvaAuthStore.Lock()
 	canvaAuthStore.values[state] = pendingCanvaAuth{
 		CodeVerifier: codeVerifier,
@@ -123,31 +111,33 @@ func canvaAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	canvaAuthStore.Unlock()
 
-	// Remove expired authorization attempts.
 	cleanupCanvaAuthStore()
 
-	params := url.Values{}
-	params.Set("code_challenge", codeChallenge)
-	params.Set("code_challenge_method", "S256")
-	params.Set("scope", scope)
-	params.Set("response_type", "code")
-	params.Set("client_id", clientID)
-	params.Set("state", state)
-	params.Set("redirect_uri", redirectURI)
+	authURL, err := url.Parse(canvaAuthorizeURL)
+	if err != nil {
+		http.Error(w, "failed to build Canva authorization URL", http.StatusInternalServerError)
+		return
+	}
 
-	authorizationURL := canvaAuthorizeURL + "?" + params.Encode()
+	query := authURL.Query()
 
-	log.Printf("starting Canva OAuth authorization")
-	log.Printf("Canva redirect URI: %s", redirectURI)
-	log.Printf("Canva state generated successfully")
-	log.Printf("Canva PKCE code challenge generated successfully")
+	query.Set("code_challenge", codeChallenge)
+	query.Set("code_challenge_method", "S256")
+	query.Set("scope", scopes)
+	query.Set("response_type", "code")
+	query.Set("client_id", clientID)
+	query.Set("state", state)
+	query.Set("redirect_uri", redirectURI)
 
-	http.Redirect(w, r, authorizationURL, http.StatusFound)
+	authURL.RawQuery = query.Encode()
+
+	http.Redirect(w, r, authURL.String(), http.StatusFound)
 }
 
-// getAndDeleteCanvaAuth retrieves the verifier associated with a state.
-//
-// The state is single-use, so it is deleted immediately.
+// ------------------------------------------------------------
+// OAuth state
+// ------------------------------------------------------------
+
 func getAndDeleteCanvaAuth(state string) (pendingCanvaAuth, bool) {
 	canvaAuthStore.Lock()
 	defer canvaAuthStore.Unlock()
@@ -167,7 +157,6 @@ func getAndDeleteCanvaAuth(state string) (pendingCanvaAuth, bool) {
 	return auth, true
 }
 
-// cleanupCanvaAuthStore removes expired authorization attempts.
 func cleanupCanvaAuthStore() {
 	now := time.Now()
 
@@ -181,11 +170,10 @@ func cleanupCanvaAuthStore() {
 	}
 }
 
-// handleCanvaOAuthCallback receives Canva's OAuth redirect.
-//
-// At this stage it validates state and returns the authorization code.
-// The code_verifier remains server-side and is available for the next
-// token-exchange step.
+// ------------------------------------------------------------
+// GET /seatalk/callback
+// ------------------------------------------------------------
+
 func handleCanvaOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -194,60 +182,212 @@ func handleCanvaOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 
-	code := strings.TrimSpace(query.Get("code"))
-	state := strings.TrimSpace(query.Get("state"))
-	errorCode := strings.TrimSpace(query.Get("error"))
-	errorDescription := strings.TrimSpace(query.Get("error_description"))
+	// Canva may return an OAuth error instead of a code.
+	if oauthError := query.Get("error"); oauthError != "" {
+		description := query.Get("error_description")
 
-	if errorCode != "" {
-		writeCanvaJSON(w, http.StatusBadRequest, map[string]any{
-			"ok":                false,
-			"error":             errorCode,
-			"error_description": errorDescription,
-		})
+		log.Printf(
+			"Canva OAuth error: %s - %s",
+			oauthError,
+			description,
+		)
+
+		http.Error(
+			w,
+			"Canva authorization was not completed",
+			http.StatusBadRequest,
+		)
 		return
 	}
 
+	code := query.Get("code")
+	state := query.Get("state")
+
 	if code == "" {
-		http.Error(w, "missing Canva authorization code", http.StatusBadRequest)
+		http.Error(
+			w,
+			"missing Canva authorization code",
+			http.StatusBadRequest,
+		)
 		return
 	}
 
 	if state == "" {
-		http.Error(w, "missing OAuth state", http.StatusBadRequest)
+		http.Error(
+			w,
+			"missing OAuth state",
+			http.StatusBadRequest,
+		)
 		return
 	}
 
-	_, ok := getAndDeleteCanvaAuth(state)
+	// Recover and consume the original PKCE verifier.
+	pendingAuth, ok := getAndDeleteCanvaAuth(state)
+
 	if !ok {
-		http.Error(w, "invalid or expired OAuth state", http.StatusBadRequest)
+		http.Error(
+			w,
+			"invalid or expired OAuth state",
+			http.StatusBadRequest,
+		)
+		return
+	}
+
+	log.Printf("Canva OAuth state verified; PKCE verifier recovered")
+
+	// Exchange authorization code for tokens.
+	tokenResponse, err := exchangeCanvaAuthorizationCode(
+		code,
+		pendingAuth.CodeVerifier,
+	)
+
+	if err != nil {
+		log.Printf("Canva token exchange failed: %v", err)
+
+		http.Error(
+			w,
+			"Canva token exchange failed",
+			http.StatusBadGateway,
+		)
 		return
 	}
 
 	// IMPORTANT:
-	// pendingAuth.CodeVerifier is the SAME verifier used to generate
-	// the code_challenge sent to Canva.
-	//
-	// We will use it in the next step when exchanging the authorization
-	// code for Canva access/refresh tokens.
-
-	log.Printf("Canva OAuth authorization code received successfully")
-	log.Printf("Canva OAuth state verified successfully")
-	log.Printf("Canva PKCE verifier recovered successfully")
+	// Do not log access_token or refresh_token.
+	log.Printf("Canva OAuth token exchange succeeded")
 
 	writeCanvaJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "Canva authorization succeeded. The OAuth state was verified and the PKCE verifier was recovered on the server.",
-		"code":    code,
-		"state":   state,
+		"message": "Canva authorization and token exchange succeeded.",
+		"token": map[string]any{
+			"token_type":   tokenResponse.TokenType,
+			"expires_in":   tokenResponse.ExpiresIn,
+			"scope":        tokenResponse.Scope,
+			"has_access":   tokenResponse.AccessToken != "",
+			"has_refresh":  tokenResponse.RefreshToken != "",
+		},
 	})
 }
 
-func writeCanvaJSON(w http.ResponseWriter, status int, payload map[string]any) {
+// ------------------------------------------------------------
+// Canva token exchange
+// ------------------------------------------------------------
+
+type canvaTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"`
+}
+
+func exchangeCanvaAuthorizationCode(
+	code string,
+	codeVerifier string,
+) (*canvaTokenResponse, error) {
+
+	clientID := strings.TrimSpace(os.Getenv("CANVA_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("CANVA_CLIENT_SECRET"))
+	redirectURI := strings.TrimSpace(os.Getenv("CANVA_REDIRECT_URI"))
+
+	if clientID == "" {
+		return nil, fmt.Errorf("CANVA_CLIENT_ID is not configured")
+	}
+
+	if clientSecret == "" {
+		return nil, fmt.Errorf("CANVA_CLIENT_SECRET is not configured")
+	}
+
+	if redirectURI == "" {
+		return nil, fmt.Errorf("CANVA_REDIRECT_URI is not configured")
+	}
+
+	form := url.Values{}
+
+	form.Set("grant_type", "authorization_code")
+	form.Set("code_verifier", codeVerifier)
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		canvaTokenURL,
+		strings.NewReader(form.Encode()),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("create token request: %w", err)
+	}
+
+	req.Header.Set(
+		"Authorization",
+		"Basic "+base64.StdEncoding.EncodeToString(
+			[]byte(clientID+":"+clientSecret),
+		),
+	)
+
+	req.Header.Set(
+		"Content-Type",
+		"application/x-www-form-urlencoded",
+	)
+
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return nil, fmt.Errorf("send token request: %w", err)
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(
+		io.LimitReader(resp.Body, 1<<20),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("read token response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Log status only, not credentials or authorization codes.
+		return nil, fmt.Errorf(
+			"Canva returned HTTP %d",
+			resp.StatusCode,
+		)
+	}
+
+	var tokenResponse canvaTokenResponse
+
+	if err := json.Unmarshal(body, &tokenResponse); err != nil {
+		return nil, fmt.Errorf(
+			"decode Canva token response: %w",
+			err,
+		)
+	}
+
+	if tokenResponse.AccessToken == "" {
+		return nil, fmt.Errorf(
+			"Canva response did not contain an access token",
+		)
+	}
+
+	return &tokenResponse, nil
+}
+
+// ------------------------------------------------------------
+// JSON helper
+// ------------------------------------------------------------
+
+func writeCanvaJSON(
+	w http.ResponseWriter,
+	status int,
+	value any,
+) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("failed to write Canva JSON response: %v", err)
-	}
+	_ = json.NewEncoder(w).Encode(value)
 }
